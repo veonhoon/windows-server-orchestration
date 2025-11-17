@@ -1,0 +1,7 @@
+{
+  "startupCommand": "npm run start",
+  "programCwd": "C:\\MyPrograms\\server-program",
+  "programName": "server-program",
+  "agentPort": 3001,
+  "apiKey": "your-secret-api-key-change-this"
+}
