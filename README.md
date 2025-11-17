@@ -26,6 +26,13 @@ This orchestration system allows you to control 4+ Windows servers from a single
 - Streaming logs from agents and programs
 - WebSocket-based live updates
 
+📱 **Phone Monitoring (NEW!)**
+- Track Android devices via ADB on each server
+- Monitor online/offline/unauthorized status
+- Device information (model, Android version, battery)
+- Remote device reboot
+- Easy add/edit/remove management
+
 🔒 **Security Built-In**
 - API key authentication
 - Cloudflare Tunnel support
@@ -41,13 +48,13 @@ This orchestration system allows you to control 4+ Windows servers from a single
 ## 🏗️ System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Dashboard (Next.js)                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐│
-│  │ Control  │  │ Terminal │  │   Logs   │  │  Config  ││
-│  │  Panel   │  │  (xterm) │  │  Viewer  │  │  Editor  ││
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘│
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      Dashboard (Next.js)                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────┐│
+│  │ Control  │  │ Terminal │  │   Logs   │  │  Phones  │  │Cfg ││
+│  │  Panel   │  │  (xterm) │  │  Viewer  │  │ Monitor  │  │    ││
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └────┘│
+└─────────────────────────────────────────────────────────────────┘
                             │
          REST API + WebSockets (HTTPS/WSS)
                             │
@@ -78,7 +85,9 @@ control board/
 │   ├── terminal.js            # Terminal manager (PTY + WebSocket)
 │   ├── shell.js               # Command execution wrapper
 │   ├── stats.js               # System statistics collector
+│   ├── adb-monitor.js         # Phone/ADB monitoring (NEW!)
 │   ├── config.json            # Per-server configuration
+│   ├── phones.json            # Phone configurations (NEW!)
 │   ├── pm2.json               # PM2 ecosystem file
 │   ├── package.json           # Node.js dependencies
 │   └── README_windows.md      # Windows setup instructions
@@ -91,7 +100,8 @@ control board/
 │   ├── components/
 │   │   ├── ServerSelector.tsx # Server list sidebar
 │   │   ├── StatsPanel.tsx     # Real-time stats display
-│   │   └── TerminalView.tsx   # Interactive terminal (xterm.js)
+│   │   ├── TerminalView.tsx   # Interactive terminal (xterm.js)
+│   │   └── PhoneMonitor.tsx   # Phone monitoring UI (NEW!)
 │   ├── lib/
 │   │   ├── servers.ts         # Server configuration
 │   │   └── fetcher.ts         # API client functions
@@ -185,6 +195,7 @@ Or deploy to Vercel, Docker, PM2, etc. (see [dashboard/README.md](dashboard/READ
 
 - **[Agent Setup](agent/README_windows.md)** - Complete Windows installation guide
 - **[Dashboard Setup](dashboard/README.md)** - Dashboard configuration and deployment
+- **[Phone Monitoring](PHONE_MONITORING.md)** - **NEW!** Android device monitoring via ADB
 - **[Installation Guide](build/install-agent-instructions.txt)** - Step-by-step deployment instructions
 - **[Deployment Checklist](build/DEPLOYMENT_CHECKLIST.md)** - Track your deployment progress
 
@@ -210,7 +221,14 @@ All agent endpoints require `X-API-Key` header or `?apiKey=` parameter:
 | `/terminal/create` | POST | Create terminal session |
 | `/terminal/list` | GET | List terminal sessions |
 | `/terminal/:id` | DELETE | Kill terminal session |
-| `/ws` | WebSocket | Terminal + stats streaming |
+| `/phones/status` | GET | **NEW!** Get phone monitoring status |
+| `/phones` | GET | **NEW!** Get all configured phones |
+| `/phones` | POST | **NEW!** Add a new phone |
+| `/phones/:serial` | PUT | **NEW!** Update phone configuration |
+| `/phones/:serial` | DELETE | **NEW!** Remove a phone |
+| `/phones/:serial/reboot` | POST | **NEW!** Reboot a phone |
+| `/phones/adb/check` | GET | **NEW!** Check ADB availability |
+| `/ws` | WebSocket | Terminal + stats + phone streaming |
 
 ### WebSocket Messages
 
@@ -222,6 +240,8 @@ All agent endpoints require `X-API-Key` header or `?apiKey=` parameter:
 {"type": "terminal.resize", "cols": 80, "rows": 30}
 {"type": "stats.start", "interval": 2000}
 {"type": "stats.stop"}
+{"type": "phones.start"}
+{"type": "phones.stop"}
 ```
 
 **Server → Client:**
@@ -229,6 +249,7 @@ All agent endpoints require `X-API-Key` header or `?apiKey=` parameter:
 {"type": "terminal.created", "terminal": {...}}
 {"type": "output", "data": "..."}
 {"type": "stats", "data": {...}}
+{"type": "phones.status", "data": {...}}
 {"type": "error", "message": "..."}
 ```
 

@@ -3,6 +3,7 @@ import Head from 'next/head';
 import ServerSelector from '@/components/ServerSelector';
 import StatsPanel from '@/components/StatsPanel';
 import TerminalView from '@/components/TerminalView';
+import PhoneMonitor from '@/components/PhoneMonitor';
 import { servers, ServerConfig } from '@/lib/servers';
 import {
   runCommand,
@@ -28,7 +29,7 @@ interface PM2Process {
 
 export default function Home() {
   const [selectedServer, setSelectedServer] = useState<ServerConfig | null>(null);
-  const [activeTab, setActiveTab] = useState<'control' | 'terminal' | 'logs' | 'config'>('control');
+  const [activeTab, setActiveTab] = useState<'control' | 'terminal' | 'logs' | 'config' | 'phones'>('control');
   const [commandInput, setCommandInput] = useState('');
   const [commandOutput, setCommandOutput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -289,6 +290,12 @@ export default function Home() {
                 Logs
               </button>
               <button
+                className={`tab ${activeTab === 'phones' ? 'active' : ''}`}
+                onClick={() => setActiveTab('phones')}
+              >
+                Phones
+              </button>
+              <button
                 className={`tab ${activeTab === 'config' ? 'active' : ''}`}
                 onClick={() => setActiveTab('config')}
               >
@@ -466,6 +473,12 @@ export default function Home() {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'phones' && (
+                <div className="phones-container-full">
+                  <PhoneMonitor server={selectedServer} />
                 </div>
               )}
 
@@ -828,7 +841,8 @@ export default function Home() {
           overflow-y: auto;
         }
 
-        .terminal-container-full {
+        .terminal-container-full,
+        .phones-container-full {
           height: calc(100vh - 260px);
         }
 

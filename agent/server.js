@@ -8,6 +8,7 @@ const path = require('path');
 const { getSystemStats, startStatsStream } = require('./stats');
 const shell = require('./shell');
 const TerminalManager = require('./terminal');
+const ADBMonitor = require('./adb-monitor');
 
 // Load configuration
 const configPath = path.join(__dirname, 'config.json');
@@ -34,6 +35,10 @@ const wss = new WebSocket.Server({ server, path: '/ws' });
 
 // Initialize terminal manager
 const terminalManager = new TerminalManager();
+
+// Initialize ADB monitor
+const adbMonitor = new ADBMonitor(configPath);
+adbMonitor.startMonitoring(5000); // Check every 5 seconds
 
 // Middleware
 app.use(cors());
@@ -366,6 +371,158 @@ app.delete('/terminal/:id', (req, res) => {
   }
 });
 
+// ============================================
+// Phone Monitoring Endpoints (ADB)
+// ============================================
+
+/**
+ * GET /phones/status - Get phone monitoring status
+ */
+app.get('/phones/status', (req, res) => {
+  try {
+    const status = adbMonitor.getStatus();
+    res.json({
+      success: true,
+      ...status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /phones - Get all configured phones
+ */
+app.get('/phones', (req, res) => {
+  try {
+    const phones = adbMonitor.getPhones();
+    res.json({
+      success: true,
+      phones
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /phones - Add a new phone
+ */
+app.post('/phones', (req, res) => {
+  try {
+    const { serial, name, description } = req.body;
+
+    if (!serial) {
+      return res.status(400).json({
+        success: false,
+        error: 'Serial number is required'
+      });
+    }
+
+    const result = adbMonitor.addPhone({ serial, name, description });
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * PUT /phones/:serial - Update phone configuration
+ */
+app.put('/phones/:serial', (req, res) => {
+  try {
+    const { serial } = req.params;
+    const { name, description } = req.body;
+
+    const result = adbMonitor.updatePhone(serial, { name, description });
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(404).json(result);
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /phones/:serial - Remove a phone
+ */
+app.delete('/phones/:serial', (req, res) => {
+  try {
+    const { serial } = req.params;
+    const result = adbMonitor.removePhone(serial);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(404).json(result);
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /phones/:serial/reboot - Reboot a phone
+ */
+app.post('/phones/:serial/reboot', async (req, res) => {
+  try {
+    const { serial } = req.params;
+    const result = await adbMonitor.rebootDevice(serial);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /phones/adb/check - Check ADB availability
+ */
+app.get('/phones/adb/check', async (req, res) => {
+  try {
+    const result = await adbMonitor.checkADBAvailability();
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // WebSocket handling
 wss.on('connection', (ws, req) => {
   console.log('WebSocket client connected');
@@ -385,6 +542,7 @@ wss.on('connection', (ws, req) => {
 
   let currentTerminalId = null;
   let statsInterval = null;
+  let phoneStatusListener = null;
 
   ws.on('message', (message) => {
     try {
@@ -458,6 +616,34 @@ wss.on('connection', (ws, req) => {
           }
           break;
 
+        case 'phones.start':
+          // Send initial status
+          const initialStatus = adbMonitor.getStatus();
+          ws.send(JSON.stringify({
+            type: 'phones.status',
+            data: initialStatus
+          }));
+
+          // Create listener for updates
+          phoneStatusListener = (status) => {
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'phones.status',
+                data: status
+              }));
+            }
+          };
+
+          adbMonitor.addListener(phoneStatusListener);
+          break;
+
+        case 'phones.stop':
+          if (phoneStatusListener) {
+            adbMonitor.removeListener(phoneStatusListener);
+            phoneStatusListener = null;
+          }
+          break;
+
         default:
           ws.send(JSON.stringify({
             type: 'error',
@@ -478,6 +664,9 @@ wss.on('connection', (ws, req) => {
     if (statsInterval) {
       clearInterval(statsInterval);
     }
+    if (phoneStatusListener) {
+      adbMonitor.removeListener(phoneStatusListener);
+    }
   });
 
   ws.on('error', (error) => {
@@ -497,6 +686,7 @@ server.listen(PORT, '0.0.0.0', () => {
 process.on('SIGINT', () => {
   console.log('\nShutting down gracefully...');
   terminalManager.killAllTerminals();
+  adbMonitor.stopMonitoring();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);
@@ -506,6 +696,7 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   console.log('\nReceived SIGTERM, shutting down...');
   terminalManager.killAllTerminals();
+  adbMonitor.stopMonitoring();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);
